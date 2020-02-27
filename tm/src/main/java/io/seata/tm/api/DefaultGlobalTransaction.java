@@ -22,6 +22,7 @@ import io.seata.core.context.RootContext;
 import io.seata.core.exception.TransactionException;
 import io.seata.core.model.GlobalStatus;
 import io.seata.core.model.TransactionManager;
+import io.seata.core.protocol.transaction.GlobalCommitRequest;
 import io.seata.tm.TransactionManagerHolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -117,8 +118,12 @@ public class DefaultGlobalTransaction implements GlobalTransaction {
 
     }
 
+    /**
+     * vergilyn-comment, 2020-02-25 >>>> {@linkplain GlobalCommitRequest}
+     */
     @Override
     public void commit() throws TransactionException {
+        // vergilyn-comment, 2020-02-25 >>>> seata中 global commit/rollback都只由launcher负责。
         if (role == GlobalTransactionRole.Participant) {
             // Participant has no responsibility of committing
             if (LOGGER.isDebugEnabled()) {
@@ -133,7 +138,9 @@ public class DefaultGlobalTransaction implements GlobalTransaction {
         try {
             while (retry > 0) {
                 try {
-                    // vergilyn-question, 2020-02-23 >>>> server不一定返回的是 Committed/Finish 啊！参考server端代码
+                    /* vergilyn-question, 2020-02-23 >>>> server不一定返回的是 Committed/Finish 啊！
+                     *   server代码 {@link DefaultCore#commit(...)}
+                     */
                     status = transactionManager.commit(xid);
                     break;
                 } catch (Throwable ex) {

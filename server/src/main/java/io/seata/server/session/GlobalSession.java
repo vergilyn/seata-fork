@@ -101,7 +101,7 @@ public class GlobalSession implements SessionLifecycle, SessionStorable {
 
     /**
      * Can be committed async boolean.
-     *
+     * vergilyn-comment, 2020-02-25 >>>> false, exist branchType equal TCC.
      * @return the boolean
      */
     public boolean canBeCommittedAsync() {
@@ -173,6 +173,10 @@ public class GlobalSession implements SessionLifecycle, SessionStorable {
         }
     }
 
+    /* vergilyn-comment, 2020-02-25 >>>>
+     *  1. DELETE lock_table (xid, branchIds)
+     *  2. DELETE global_table
+     */
     @Override
     public void end() throws TransactionException {
         // Clean locks first
@@ -184,6 +188,9 @@ public class GlobalSession implements SessionLifecycle, SessionStorable {
 
     }
 
+    /**
+     * vergilyn-comment, 2020-02-25 >>>> delete lock_table (xid, branchIds)
+     */
     public void clean() throws TransactionException {
         LockerFactory.getLockManager().releaseGlobalSessionLock(this);
 
@@ -196,7 +203,7 @@ public class GlobalSession implements SessionLifecycle, SessionStorable {
      */
     public void closeAndClean() throws TransactionException {
         close();  // 如果active=true，调用listener.onClose()，并且将active设置成false。
-        clean();  // 调用LockManager.releaseGlobalSessionLock()，底层删除lock_table的数据。
+        clean();
 
     }
 
@@ -227,6 +234,10 @@ public class GlobalSession implements SessionLifecycle, SessionStorable {
         add(branchSession);
     }
 
+    /* vergilyn-comment, 2020-02-25 >>>>
+     *   1. DELETE branch_table
+     *   2. DELETE lock_table (xid, branchId)
+     */
     @Override
     public void removeBranch(BranchSession branchSession) throws TransactionException {
         for (SessionLifecycleListener lifecycleListener : lifecycleListeners) {

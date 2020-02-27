@@ -257,6 +257,14 @@ public class DefaultCoordinator extends AbstractTCInboundHandler
             } else {
                 BranchSession branchSession = globalSession.getBranch(branchId);
                 if (null != branchSession) {
+                    /* vergilyn-comment, 2020-02-24 >>>>
+                     *   client端代码
+                     *     - {@link io.seata.core.rpc.netty.RmMessageListener#onMessage(...)}
+                     *     - {@link AbstractRMHandler#handle(BranchCommitRequest)}
+                     *     - {@link AsyncWorker#branchCommit(...)}
+                     *
+                     *   client 响应的一定是 PhaseTwo_Committed！
+                     */
                     BranchCommitResponse response = (BranchCommitResponse)messageSender.sendSyncRequest(resourceId,
                         branchSession.getClientId(), request);
                     return response.getBranchStatus();
@@ -308,7 +316,14 @@ public class DefaultCoordinator extends AbstractTCInboundHandler
             } else {
 
                 BranchSession branchSession = globalSession.getBranch(branchId);
-
+                /* vergilyn-comment, 2020-02-24 >>>>
+                 *   client端代码
+                 *     - {@link io.seata.core.rpc.netty.RmMessageListener#onMessage(...)}
+                 *     - {@link AbstractRMHandler#handle(BranchRollbackRequest)}
+                 *     - {@link DataSourceManager#branchRollback(...)}
+                 *
+                 *   client 响应的一定是 PhaseTwo_Committed！
+                 */
                 BranchRollbackResponse response = (BranchRollbackResponse)messageSender.sendSyncRequest(resourceId,
                     branchSession.getClientId(), request);
                 return response.getBranchStatus();

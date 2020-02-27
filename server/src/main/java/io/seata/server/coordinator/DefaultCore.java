@@ -304,25 +304,55 @@ public class DefaultCore implements Core {
                 /* vergilyn-question, 2020-02-23 >>>>
                  *   为什么可以直接remove后 continue?
                  *   怎么感觉是PhaseOne_Done可以直接remove？
+                 *
+                 * vergilyn-comment, 2020-02-25 >>>> 解答上面的疑问
+                 *   seata中 global commit/rollback都只由launcher负责。
+                 *   例如测试代码中，order是launcher，account是participant。
+                 *   1. account 提交成功
+                 *     那么 account 上报给seata的 PhaseOne_Done。
+                 *     如果order不执行global-rollback，那么 account是不会rollback。
+                 *
+                 *   2. account 提交失败
+                 *     那么 account 上报给seata的 PhaseOne_Failed。
+                 *     如果account执行了global-commit，那么seata是会成功commit-global-transaction的。
+                 *     而忽略account的提交失败。
+                 *
+                 * vergilyn-question, 2020-02-25 >>>>
+                 *   还是觉得PhaseOne_Done的也可以直接remove。
                  */
                 if (currentStatus == BranchStatus.PhaseOne_Failed) {
                     globalSession.removeBranch(branchSession);
                     continue;
                 }
                 try {
+                    /* vergilyn-comment, 2020-02-24 >>>>
+                     *   {@link DefaultCoordinator#branchCommit(...)}
+                     *   感觉只是通知branch-client 删除UndoLog，并且client只会返回`PhaseTwo_Committed`（除非exception）
+                     */
                     BranchStatus branchStatus = resourceManagerInbound.branchCommit(branchSession.getBranchType(),
                         branchSession.getXid(), branchSession.getBranchId(), branchSession.getResourceId(),
                         branchSession.getApplicationData());
 
                     switch (branchStatus) {
                         case PhaseTwo_Committed:
+                            /* vergilyn-comment, 2020-02-25 >>>>
+                             *   1. DELETE branch_table
+                             *   2. DELETE lock_table (xid, branchId)
+                             */
                             globalSession.removeBranch(branchSession);
                             continue;
                         case PhaseTwo_CommitFailed_Unretryable:
+
+                            // vergilyn-comment, 2020-02-25 >>>> false，如果存在 BranchType = TCC
                             if (globalSession.canBeCommittedAsync()) {
                                 LOGGER.error("By [{}], failed to commit branch {}", branchStatus, branchSession);
                                 continue;
                             } else {
+                                /* vergilyn-comment, 2020-02-25 >>>>
+                                 *   1. UPDATE global_table (status = CommitFailed)
+                                 *   2. DELETE lock_table (xid, branchIds)
+                                 *   3. DELETE global_table
+                                 */
                                 SessionHelper.endCommitFailed(globalSession);
                                 LOGGER.error("Finally, failed to commit global[{}] since branch[{}] commit failed",
                                     globalSession.getXid(), branchSession.getBranchId());
@@ -330,6 +360,7 @@ public class DefaultCore implements Core {
                             }
                         default:
                             if (!retrying) {
+                                // vergilyn-comment, 2020-02-25 >>>> commit-retrying 代码 {@link DefaultCoordinator#handleRetryCommitting(...)}
                                 queueToRetryCommit(globalSession);
                                 return;
                             }
@@ -361,6 +392,13 @@ public class DefaultCore implements Core {
             }
         }
 
+        /* vergilyn-comment, 2020-02-25 >>>>
+         *   1. UPDATE global_table (status = Committed)
+         *   2. DELETE lock_table (xid, branchIds); 正常来说`globalSession.removeBranch(branchSession);`已经单个逐一删除了。
+         *   3. DELETE global_table
+         *
+         * vergilyn-optimize, 2020-02-25 >>>> 1&3可以合并！
+         */
         SessionHelper.endCommitted(globalSession);
 
         //committed event
@@ -378,12 +416,18 @@ public class DefaultCore implements Core {
         globalSession.changeStatus(GlobalStatus.AsyncCommitting);
     }
 
+    /**
+     * vergilyn-comment, 2020-02-25 >>>> commit-retrying 代码 {@link DefaultCoordinator#handleRetryCommitting()}
+     */
     private void queueToRetryCommit(GlobalSession globalSession) throws TransactionException {
         globalSession.addSessionLifecycleListener(SessionHolder.getRetryCommittingSessionManager());
         SessionHolder.getRetryCommittingSessionManager().addGlobalSession(globalSession);
         globalSession.changeStatus(GlobalStatus.CommitRetrying);
     }
 
+    /**
+     * vergilyn-comment, 2020-02-25 >>>> commit-retrying 代码 {@link DefaultCoordinator#handleRetryRollbacking()}
+     */
     private void queueToRetryRollback(GlobalSession globalSession) throws TransactionException {
         globalSession.addSessionLifecycleListener(SessionHolder.getRetryRollbackingSessionManager());
         SessionHolder.getRetryRollbackingSessionManager().addGlobalSession(globalSession);
@@ -458,11 +502,28 @@ public class DefaultCore implements Core {
         } else {
             for (BranchSession branchSession : globalSession.getReverseSortedBranches()) {
                 BranchStatus currentBranchStatus = branchSession.getStatus();
+
+                /* vergilyn-comment, 2020-02-25 >>>>
+                 *   这里能理解（相对doGlobalCommit），PhaseOne如果提交异常，branch一定会上报。
+                 */
                 if (currentBranchStatus == BranchStatus.PhaseOne_Failed) {
+                    /* vergilyn-comment, 2020-02-25 >>>>
+                     *   1. DELETE branch_table
+                     *   2. DELETE lock_table (xid, branchId)
+                     */
                     globalSession.removeBranch(branchSession);
                     continue;
                 }
                 try {
+                    /* vergilyn-comment, 2020-02-24 >>>>
+                     *   client代码 {@link DataSourceManager#branchRollback(...)}
+                     *   根据 xid & branchId 获取到UndoLog，解析并进行补偿，然后删除UndoLog。
+                     *   （如果不存在UndoLog，那么INSERT UndoLog）
+                     *   返回：
+                     *      - PhaseTwo_Rollbacked
+                     *      - PhaseTwo_RollbackFailed_Unretryable
+                     *      - PhaseTwo_RollbackFailed_Retryable
+                     */
                     BranchStatus branchStatus = resourceManagerInbound.branchRollback(branchSession.getBranchType(),
                         branchSession.getXid(), branchSession.getBranchId(), branchSession.getResourceId(),
                         branchSession.getApplicationData());
@@ -470,10 +531,15 @@ public class DefaultCore implements Core {
                     switch (branchStatus) {
                         case PhaseTwo_Rollbacked:
                             globalSession.removeBranch(branchSession);
-                            LOGGER.info("Successfully rollback branch xid={} branchId={}", globalSession.getXid(),
+                             LOGGER.info("Successfully rollback branch xid={} branchId={}", globalSession.getXid(),
                                 branchSession.getBranchId());
                             continue;
                         case PhaseTwo_RollbackFailed_Unretryable:
+                            /* vergilyn-comment, 2020-02-25 >>>>
+                             * 1. UPDATE global_table, status = TimeoutRollbackFailed/RollbackFailed
+                             * 2. DELETE lock_table (xid, branchIds)
+                             * 3. DELETE global_table
+                             */
                             SessionHelper.endRollbackFailed(globalSession);
                             LOGGER.info("Failed to rollback branch and stop retry xid={} branchId={}",
                                 globalSession.getXid(), branchSession.getBranchId());

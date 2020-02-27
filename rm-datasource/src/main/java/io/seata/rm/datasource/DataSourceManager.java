@@ -178,6 +178,11 @@ public class DataSourceManager extends AbstractResourceManager implements Initia
             throw new ShouldNeverHappenException();
         }
         try {
+            /* vergilyn-comment, 2020-02-25 >>>>
+             * 获取cache中的`DataSourceProxy`，然后根据 xid&branchId 获取UndoLog进行补偿。
+             *   1) 存在UndoLog，解析并进行补偿，完成后 DELETE UndoLog。
+             *   2) 不存在UndoLog，`insertUndoLogWithGlobalFinished`(log_status = GlobalFinished)
+             */
             UndoLogManagerFactory.getUndoLogManager(dataSourceProxy.getDbType()).undo(dataSourceProxy, xid, branchId);
         } catch (TransactionException te) {
             StackTraceLogger.info(LOGGER, te,

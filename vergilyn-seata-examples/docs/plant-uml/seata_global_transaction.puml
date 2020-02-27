@@ -11,11 +11,11 @@ partition 10.client #LightSkyBlue{
 
 --> "10. TransactionalTemplate#execute(...)"
 
--->[begin transaction] "10. DefaultGlobalTransaction#begin(...)"
+-->[ **begin transaction**] "10. DefaultGlobalTransaction#begin(...)"
 
 --> "10. DefaultTransactionManager#begin(...)"
 
--->[ **`TmRpcClient.class`** instance] "10. AbstractRpcRemotingClient#sendMsgWithResponse(...)"
+-->[ **`TmRpcClient.class`** instance] "10. AbstractRpcRemotingClient#sendMsgWithResponse(...)" as 10.begin_global_transaction
 note right
 1. client 此时才会去获取`seata.txServiceGroup`，而不是通过参数传递到此。
 2. 并且获取可与server通信的netty-channel
@@ -34,6 +34,71 @@ msg: `GlobalBeginRequest.class`，
   这个timeout/transactionName即`@GlobalTransaction`中设置的值
   timeout指的是global-transaction的timeout，而非client与server通信中的timeout
 timeout: 表示本次通信等待server返回结果的timeout。其值是`NettyClientConfig.getRpcRequestTimeout()`
+end note
+}
+
+partition 附录,10.begin_global_transaction {
+10.begin_global_transaction -left-> "seata的事务分组"
+note bottom
+[seata事务分组介绍](https://seata.io/zh-cn/docs/user/transaction-group.html)
+> 事务分组是seata的资源逻辑，类似于服务实例。在file.conf中的my_test_tx_group就是一个事务分组。
+
+例如，seata-server的`register.conf`:
+```
+registry {
+  # file 、nacos 、eureka、redis、zk、consul、etcd3、sofa
+  type = "nacos"
+
+  nacos {
+    serverAddr = "127.0.0.1:8848"
+    namespace = "be0813eb-8d8f-46a4-8afd-e5183af5333f"
+    cluster = "default"
+  }
+}
+```
+表示将当前seata-server(127.0.0.1:8091)注册到nacos中。
+
+对于seata-client
+```
+# registry.conf
+# 必须与seata-server保持一致，client通过这个nacos去发现seata-server的实例
+registry {
+  # file 、nacos 、eureka、redis、zk、consul、etcd3、sofa
+  type = "nacos"
+
+  nacos {
+    serverAddr = "127.0.0.1:8848"
+    namespace = "be0813eb-8d8f-46a4-8afd-e5183af5333f"
+    # seata-client用不到
+    # cluster = "default"
+  }
+}
+
+# order-examples
+service {
+  vgroup_mapping.order-examples_tx_group = "default" # 需要与seata-server中`register.nacos.cluster`保持一致
+}
+
+# account-examples
+service {
+  vgroup_mapping.account-examples_tx_group = "default"
+}
+
+# 如果是 spring-boot file.conf对应的application.yaml
+seata:
+  txServiceGroup: ${spring.application.name}_tx_group
+  service:
+    vgroup-mapping: default
+```
+如果此时order发起begin-global-transaction（account属于order的branch-transaction）。
+order会通过NACOS的api `{nacos-addr}/nacos/v1/ns/instance/list?serviceName=aa&namespaceId=bb&clusters=cc`获取seata-server实例：
+  serviceName: 指的是seata-server的serviceName（现在默认叫`serverAddr`）
+  namespaceId、nacos-addr: 即client的`register.conf`中配置的信息
+  <color:red>clusters: </color>即`file.conf`中的`service.vgroup_mapping.{xxx} = "default"`
+
+源码参考：`io.seata.discovery.registry.nacos.NacosRegistryServiceImpl#lookup(...)`
+
+<color:red>**ps: seata实现spring-boot-stater(AutoConfiguration)很简单粗暴，结合原本的conf导致配置蛮混乱的。 **</color>
 end note
 }
 
@@ -89,8 +154,13 @@ note right
 e.g. execute -> INSERT INTO table_name(id, name) VALUES(1, 'vergilyn');
 end note
 
--->[seata的核心proxy: \nPreparedStatementProxy.class \nDataSourceProxy.class \nConnectionProxy.class] "
+-->[seata的核心proxy: \nDataSourceProxy.class \nPreparedStatementProxy.class \nConnectionProxy.class] "
 11. <font color=purple>**io.seata.rm.datasource.PreparedStatementProxy**</font>"
+note right
+<color:red>`SeataAutoConfiguration.class`中会实例化`GlobalTransactionScanner.class`。</color>
+其实现了`org.springframework.aop.framework.autoproxy.AbstractAutoProxyCreator.postProcessAfterInitialization`
+并在其中实例化了`DataSourceProxy`
+end note
 
 -->[execute()] "
 11. <font color=purple>**io.seata.rm.datasource.exec.ExecuteTemplate#execute(...)**</font>"
@@ -153,7 +223,8 @@ note right
   `BaseTransactionalExecutor#execute(...)`时设置，即 127.0.0.1:8091:20200223-g-01
 end note
 
---> "11. io.seata.rm.AbstractResourceManager#branchRegister(...)"
+--> "11. io.seata.rm.AbstractResourceManager#branchRegister(...)" as 11.branch_registry
+
 -->[ **`RmRpcClient.class`** instance] "11. AbstractRpcRemotingClient#sendMsgWithResponse(...)" as branch_register_request
 note right
 `BranchRegisterRequest.class`:
@@ -164,6 +235,19 @@ note right
   applicationData： null
 
 （实际发送请求与之前的begin-global-transaction一样）
+end note
+}
+
+partition 附录,11.branch_registry {
+11.branch_registry -right-> "Participant是如何branch-registry？"
+note bottom
+> [SEATA 微服务框架支持](https://seata.io/zh-cn/docs/user/microservice.html)
+> 跨服务调用场景下的事务传播，本质上就是要把 XID 通过服务调用传递到服务提供方，并绑定到 RootContext 中去。
+> 只要能做到这点，理论上 Seata 可以支持任意的微服务框架。
+
+例如Feign/OpenFeign，order-examples通过`RequestInterceptor`统一设置header：`RootContext.KEY_XID = RootContext.getXID()`
+然后account-examples通过`Filter`统一获取head中的XID，并调用`RootContext.bind(XID)`。
+这样，account就是participant，其launcher是order，它们处于同一个全局事务xid中。
 end note
 }
 
@@ -180,8 +264,6 @@ note right
 
 3. 获取branchSession的lock：`branchSession.lock()`
 <font color=red>**如果获取lock成功，那么会新增lock的信息(0+条，0表示no-lock)到表 lock_table**</font>
-
-
 end note
 }
 
@@ -202,26 +284,158 @@ note right
 1. 如果commit成功，此时UndoLog和业务数据的改变都会在db中反映
 2. 根据配置参数`client.report.success.enable`是否上报seata-server
 end note
+  if "role?" then
+  -->[Participant] "12.1 FINISH" <<FINISH>>
+  note bottom
+    Participant has no responsibility of committing
+  end note
+  else
+  -->[Launcher] "12. DefaultTransactionManager#commit(...)" as global_commit_request
+  note bottom
+  `GlobalCommitRequest.class`:
+    xid: 127.0.0.1:8091:20200223-g-01
+    typeCode: TYPE_GLOBAL_COMMIT
+  end note
+  endif
+
 else
 -->[rollback] "rollback" as rollback
 note right
 exception 需要rollback。
 一定会上报seata-server。
 end note
+  if "role?" then
+  -->[Participant] "12.2 FINISH" <<FINISH>>
+  else
+  -->[Launcher] "rollback, Launcher" as launcher_rollback
+  endif
+endif
 
-if "role?" then
-success -->[Participant] "**Participant commit finish**" <<FINISH>>
-else
-success -->[Launcher] "12. DefaultTransactionManager#commit(...)" as global_commit_request
+}
+
+partition 22.server,`GlobalCommitRequest.class`,\n<color:red>**整个过程中不会触发rollback**</color> #CCCCEE{
+
+global_commit_request --> "22. DefaultCore#commit(...)"
+
+--> "22. DefaultCore#doGlobalCommit()" as 22.do_global_commit
 note right
-`GlobalCommitRequest.class`:
+1. 获取 all-branchSession，并提交`BranchCommitRequest`（seata-server向client请求）。
+  client处理代码：
+  - RmMessageListener#onMessage(...)
+  - AbstractRMHandler#handle(BranchCommitRequest)
+  - AsyncWorker#branchCommit(...)：只会返回`PhaseTwo_Committed`
+
+end note
+
+if "branch commit response?" then
+-->[ PhaseTwo_Committed] "22. GlobalSession#removeBranch(...)"
+note right
+1. DELETE branch_table
+2. DELETE lock_table (xid, branchId)
+end note
+  -->[all branch-add_branch_session PhaseTwo_Committed] "SessionHelper#endCommitted(...)" as global_commit_end
+  note bottom
+   1. UPDATE global_table (status = Committed)
+   2. DELETE lock_table (xid, branchIds);
+   正常来说`globalSession.removeBranch(branchSession)`已经单个逐一删除了。
+   3. DELETE global_table
+  end note
+else
+-->[ PhaseTwo_CommitFailed_Unretryable] "PhaseTwo_CommitFailed_Unretryable"
+    if "can be committed async?" then
+    -->[true] "continue"
+    note bottom
+      跳过当前branchSession，继续判断下一个
+    end note
+    else
+    -->[false] "global commit failed!"
+    note bottom
+       1. UPDATE global_table (status = CommitFailed)
+       2. DELETE lock_table (xid, branchIds)
+       3. DELETE global_table
+    end note
+    endif
+else
+-->[ other] "queue to retry commit"
+  note bottom
+    交给`RETRY_COMMITTING_SESSION_MANAGER`重试。
+    （后台单线程定时任务，
+    间隔 "server.recovery.committing-retry-period"，默认 1s ）。
+    - DefaultCoordinator#handleRetryCommitting(...)
+  end note
+}
+
+partition 13.client,server返回GlobalSession.status #LightSkyBlue{
+global_commit_end -->"13. DefaultGlobalTransaction#commit(...)"
+note right
+  正常来说，server返回的是 Committed/Finish。
+  <color:red>备注：client这里并没有用response-status作任何判断操作</color>
+end note
+
+--> "13. FINISH" <<FINISH>>
+}
+
+partition 23.server,`GlobalRollbackRequest.class` #CCCCEE{
+launcher_rollback--> "DefaultCore#rollback(...)"
+note right
   xid: 127.0.0.1:8091:20200223-g-01
-  typeCode: TYPE_GLOBAL_COMMIT
+end note
+
+--> "23. DefaultCore#doGlobalRollback(...)"
+note right
+同`doGlobalCommit`类似。
+获取 all-branchSession，并提交`BranchRollbackRequest`（seata-server向client请求）。
+client处理代码：
+  - RmMessageListener#onMessage(...)
+  - AbstractRMHandler#handle(BranchRollbackRequest)
+  - DataSourceManager#branchRollback(...)
+
+client获取cache中的`DataSourceProxy`，然后根据 xid&branchId 获取UndoLog进行补偿。
+  1) 存在UndoLog，解析并进行补偿，完成后 DELETE UndoLog。
+  2) 不存在UndoLog，`insertUndoLogWithGlobalFinished`(log_status = GlobalFinished)
+
+client返回结果：
+  - PhaseTwo_Rollbacked
+  - PhaseTwo_RollbackFailed_Unretryable
+  - PhaseTwo_RollbackFailed_Retryable
+end note
+
+if "branch rollback response?" then
+-->[PhaseTwo_Rollbacked] "PhaseTwo_Rollbacked"
+note bottom
+如果全部branch-rollback成功：
+1. UPDATE global_table, status = TimeoutRollbacked/Rollbacked <br/>
+2. DELETE lock_table (xid, branchIds)
+3. DELETE global_table
+end note
+else
+-->[PhaseTwo_RollbackFailed_Unretryable] "PhaseTwo_RollbackFailed_Unretryable"
+else
+-->[default] "default"
+note right
+交给`RETRY_ROLLBACKING_SESSION_MANAGER`重试。
+（后台单线程定时任务，
+间隔 "server.recovery.rollbacking-retry-period"，默认 1s ）。
+- DefaultCoordinator#handleRetryRollbacking(...)
+end note
+endif
+}
+
+partition 附录,22.do_global_commit right{
+22.do_global_commit-up-> "为什么doGlobalCommit中直接remove branchStatus = PhaseOne_Failed？"
+note bottom
+**seata中 global commit/rollback都只由launcher负责。**
+**> Participant has no responsibility of committing/rollback**
+
+例如测试代码中，order是launcher，account是participant。
+1. account 提交成功
+  那么 account 上报给seata的 PhaseOne_Done。
+  如果order不执行global-rollback，那么 account是不会rollback。
+
+2. account 提交失败
+  那么 account 上报给seata的 PhaseOne_Failed。
+  如果account执行了global-commit，那么seata是会成功commit-global-transaction的。
+  而忽略account的提交失败。
 end note
 }
-
-partition 22.server,`GlobalCommitRequest.class`{
-global_commit_request --> "22. DefaultCore#commit(...)"
-}
-
 @enduml

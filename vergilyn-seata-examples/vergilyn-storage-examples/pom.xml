@@ -18,6 +18,7 @@
             <artifactId>seata-all</artifactId>
             <version>${seata.version}</version>
         </dependency>
+        <!-- 2020-02-26移除seata的spring-boot形式
         <dependency>
             <groupId>io.seata</groupId>
             <artifactId>seata-spring-boot-starter</artifactId>
@@ -29,6 +30,7 @@
                 </exclusion>
             </exclusions>
         </dependency>
+        -->
 
         <dependency>
             <groupId>com.alibaba.cloud</groupId>

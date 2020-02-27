@@ -1,8 +1,11 @@
 # seata
+# seata引入`seata-spring-boot-starter`的坑，可能导致部分属性被默认值覆盖（而不是期望的 register.conf 中的值）
 seata:
   applicationId: ${spring.application.name}
   txServiceGroup: ${spring.application.name}_tx_group
-  # seata引入`seata-spring-boot-starter`的坑，可能导致部分属性被默认值覆盖（而不是期望的 register.conf 中的值）
+  service:
+    vgroup-mapping: default
+
   registry:
     type: nacos
     nacos:
@@ -13,4 +16,5 @@ seata:
     type: file
     file:
       name: file.conf
+
 

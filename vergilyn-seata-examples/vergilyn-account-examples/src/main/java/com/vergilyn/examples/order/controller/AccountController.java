@@ -1,5 +1,7 @@
 package com.vergilyn.examples.order.controller;
 
+import javax.servlet.http.HttpServletRequest;
+
 import com.vergilyn.examples.order.entity.Account;
 import com.vergilyn.examples.order.service.AccountService;
 import com.vergilyn.examples.response.ObjectResponse;
@@ -18,14 +20,14 @@ public class AccountController {
     private AccountService accountService;
 
     @RequestMapping("/decrease")
-    ObjectResponse<Void> decrease(@RequestParam("userId") String userId, @RequestParam("amount") Double amount){
+    ObjectResponse<Void> decrease(HttpServletRequest request, @RequestParam("userId") String userId, @RequestParam("amount") Double amount){
         log.info("请求账户微服务 `/account/decrease` >>>> userId = {}, amount = {}", userId, amount);
 
         return accountService.decrease(userId, amount);
     }
 
     @RequestMapping("/get")
-    ObjectResponse<Account> get(String userId){
+    ObjectResponse<Account> get(HttpServletRequest request, String userId){
         log.info("请求账户微服务 `/account/get` >>>> userId = {}", userId);
         return accountService.get(userId);
     }

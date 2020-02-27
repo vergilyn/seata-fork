@@ -61,7 +61,14 @@ public class SessionHelper {
 
     /**
      * End committed.
+     * <p>
+     *   vergilyn-comment, 2020-02-25 >>>> <br/>
+     *     1. UPDATE global_table (status = Committed) <br/>
+     *     2. DELETE lock_table (xid, branchIds) <br/>
+     *     3. DELETE global_table  <br/>
      *
+     *   vergilyn-optimize, 2020-02-25 >>>> 1&3可以合并！
+     * </p>
      * @param globalSession the global session
      * @throws TransactionException the transaction exception
      */
@@ -72,7 +79,11 @@ public class SessionHelper {
 
     /**
      * End commit failed.
-     *
+     * <p>vergilyn-comment, 2020-02-25 >>>> <br/>
+     *   1. UPDATE global_table (status = CommitFailed) <br/>
+     *   2. DELETE lock_table (xid, branchIds) <br/>
+     *   3. DELETE global_table <br/>
+     * </p>
      * @param globalSession the global session
      * @throws TransactionException the transaction exception
      */
@@ -83,7 +94,11 @@ public class SessionHelper {
 
     /**
      * End rollbacked.
-     *
+     * <p>vergilyn-comment, 2020-02-25 >>>> <br/>
+     *   1. UPDATE global_table, status = TimeoutRollbacked/Rollbacked <br/>
+     *   2. DELETE lock_table (xid, branchIds) <br/>
+     *   3. DELETE global_table <br/>
+     * </p>
      * @param globalSession the global session
      * @throws TransactionException the transaction exception
      */
@@ -99,7 +114,11 @@ public class SessionHelper {
 
     /**
      * End rollback failed.
-     *
+     * <p>vergilyn-comment, 2020-02-25 >>>> <br/>
+     *   1. UPDATE global_table, status = TimeoutRollbackFailed/RollbackFailed
+     *   2. DELETE lock_table (xid, branchIds)
+     *   3. DELETE global_table
+     * </p>
      * @param globalSession the global session
      * @throws TransactionException the transaction exception
      */

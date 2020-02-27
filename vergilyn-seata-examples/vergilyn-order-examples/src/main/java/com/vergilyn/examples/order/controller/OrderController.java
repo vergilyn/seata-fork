@@ -20,7 +20,7 @@ public class OrderController {
 
     @RequestMapping("/create")
     public ObjectResponse<OrderDTO> createOrder(String userId, String commodityCode, Integer orderTotal, Double orderAmount){
-        log.info("请求订单微服务 `/order/creat` >>>> userId = {}, commodityCode = {}, orderTotal = {}, orderAmount = {}"
+        log.info("请求订单微服务 `/order/create` >>>> userId = {}, commodityCode = {}, orderTotal = {}, orderAmount = {}"
                 , userId, commodityCode, orderTotal, orderAmount);
 
         ObjectResponse<OrderDTO> resp;

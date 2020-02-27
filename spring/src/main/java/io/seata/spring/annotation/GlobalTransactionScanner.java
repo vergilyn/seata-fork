@@ -335,9 +335,21 @@ public class GlobalTransactionScanner extends AbstractAutoProxyCreator
         return super.postProcessBeforeInitialization(bean, beanName);
     }
 
+    /* vergilyn-comment, 2020-02-25 >>>>
+     *   创建 {@link DataSourceProxy}
+     *
+     * {@link AbstractAutoProxyCreator#postProcessAfterInitialization(...)}
+     * 由于AbstractAutoProxyCreator实现了BeanPostProcessor接口，因此它的调用时机也可以是在属性注入之后，初始化方法调用前后。
+     * AbstractAutoProxyCreator给出初始化方法调用之后创建代理对象的实现。
+     */
     @Override
     public Object postProcessAfterInitialization(Object bean, String beanName) throws BeansException {
-        if (bean instanceof DataSource && !(bean instanceof DataSourceProxy) && ConfigurationFactory.getInstance().getBoolean(DATASOURCE_AUTOPROXY, false)) {
+        /* vergilyn-comment, 2020-02-27 >>>>
+         *   注意将`file.conf`中的"client.support.spring.datasource.autoproxy = true"
+         */
+        if (bean instanceof DataSource
+                && !(bean instanceof DataSourceProxy)
+                && ConfigurationFactory.getInstance().getBoolean(DATASOURCE_AUTOPROXY, false)) {
             if (LOGGER.isInfoEnabled()) {
                 LOGGER.info("Auto proxy of [{}]", beanName);
             }

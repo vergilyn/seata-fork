@@ -15,20 +15,6 @@
  */
 package io.seata.rm.datasource;
 
-import io.seata.common.exception.NotSupportYetException;
-import io.seata.common.exception.ShouldNeverHappenException;
-import io.seata.common.thread.NamedThreadFactory;
-import io.seata.common.util.CollectionUtils;
-import io.seata.config.ConfigurationFactory;
-import io.seata.core.exception.TransactionException;
-import io.seata.core.model.BranchStatus;
-import io.seata.core.model.BranchType;
-import io.seata.core.model.ResourceManagerInbound;
-import io.seata.rm.DefaultResourceManager;
-import io.seata.rm.datasource.undo.UndoLogManagerFactory;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.ArrayList;
@@ -42,6 +28,20 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+
+import io.seata.common.exception.NotSupportYetException;
+import io.seata.common.exception.ShouldNeverHappenException;
+import io.seata.common.thread.NamedThreadFactory;
+import io.seata.common.util.CollectionUtils;
+import io.seata.config.ConfigurationFactory;
+import io.seata.core.exception.TransactionException;
+import io.seata.core.model.BranchStatus;
+import io.seata.core.model.BranchType;
+import io.seata.core.model.ResourceManagerInbound;
+import io.seata.rm.DefaultResourceManager;
+import io.seata.rm.datasource.undo.UndoLogManagerFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import static io.seata.core.constants.ConfigurationKeys.CLIENT_ASYNC_COMMIT_BUFFER_LIMIT;
 
@@ -112,6 +112,17 @@ public class AsyncWorker implements ResourceManagerInbound {
     @Override
     public BranchStatus branchCommit(BranchType branchType, String xid, long branchId, String resourceId,
                                      String applicationData) throws TransactionException {
+
+        /* vergilyn-comment, 2020-02-24 >>>>
+         *   {@link #init()} async是通过 BlockingQueue 和 Scheduler 实现。
+         *   实际操作查看代码 {@link #doBranchCommits()}
+         *
+         * 备注：如果offer添加成功，返回true；否则返回false
+         *
+         * vergilyn-question, 2020-02-25 >>>>
+         *   client返回给seata-server的一定是`PhaseTwo_Committed`。
+         *   其实不影响，因为branch-transaction已经提交完成，也不需要rollback。只是需要删除UndoLog
+         */
         if (!ASYNC_COMMIT_BUFFER.offer(new Phase2Context(branchType, xid, branchId, resourceId, applicationData))) {
             LOGGER.warn("Async commit buffer is FULL. Rejected branch [" + branchId + "/" + xid
                 + "] will be handled by housekeeping later.");
@@ -140,6 +151,10 @@ public class AsyncWorker implements ResourceManagerInbound {
         }, 10, 1000 * 1, TimeUnit.MILLISECONDS);
     }
 
+    /**
+     * vergilyn-comment, 2020-02-24 >>>> async提交分支事务
+     *   1. 删除UndoLog
+     */
     private void doBranchCommits() {
         if (ASYNC_COMMIT_BUFFER.size() == 0) {
             return;

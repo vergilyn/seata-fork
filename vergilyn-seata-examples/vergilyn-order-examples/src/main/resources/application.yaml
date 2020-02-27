@@ -3,4 +3,4 @@ spring:
     active:
       - datasource
       - fegin
-      - seata
+    # - seata # 2020-02-26移除seata的spring-boot形式
