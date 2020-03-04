@@ -33,6 +33,9 @@ public class RandomLoadBalance extends AbstractLoadBalance {
     @Override
     protected <T> T doSelect(List<T> invokers) {
         int length = invokers.size();
+        /* vergilyn-comment, 2020-02-29 >>>>
+         *   dubbo中的写法 `ThreadLocalRandom.current().nextInt(length)`
+         */
         return invokers.get(random.nextInt(length));
     }
 }

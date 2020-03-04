@@ -85,3 +85,37 @@ b) config采用`file`。
 [seata.io zh-cn docs]: https://seata.io/zh-cn/docs/overview/what-is-seata.html
 [github, seata]: https://github.com/seata/seata
 [vergilyn seata-fork]: https://github.com/vergilyn/seata-fork
+
+## 3. 备注
+
+### 3.1 `io.seata.common.loader.EnhancedServiceLoader`
+觉得这个工具类很有意思。
+
+2020-03-04 >>>>
+今天看了一下，原来这个Loader需要在`META-INF/services/`或`META-INF/seata/`中新增文件配合使用。
+即告诉Loader，需要`Class.forName(xxx)`，让后
+
+涉及到的新知识：
+1. java.lang.Class#cast(...)
+Casts an object to the class or interface represented by this Class object.
+(将对象强制转换为此类对象表示的类或接口。)
+
+**实际就是类型强转，不过做了一些安全措施。**
+
+```JAVA
+package java.lang;
+
+public final class Class<T> implements java.io.Serializable,
+                              GenericDeclaration,
+                              Type,
+                              AnnotatedElement {
+    
+    public T cast(Object obj) {
+        if (obj != null && !isInstance(obj))
+            throw new ClassCastException(cannotCastMsg(obj));
+        return (T) obj;
+    }
+    
+    public native boolean isInstance(Object obj);
+}
+```

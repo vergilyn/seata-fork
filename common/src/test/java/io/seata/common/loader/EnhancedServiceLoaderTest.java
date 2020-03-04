@@ -15,10 +15,10 @@
  */
 package io.seata.common.loader;
 
+import java.util.List;
+
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-
-import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -28,6 +28,15 @@ import static org.assertj.core.api.Assertions.assertThat;
  * @author Otis.z
  */
 public class EnhancedServiceLoaderTest {
+
+    /**
+     * vergilyn-comment, 2020-03-04 >>>> 个人添加测试
+     */
+    @Test
+    public void test() {
+        Hello load = EnhancedServiceLoader.load(Hello.class, "ChineseHello");
+        System.out.println(load.say());
+    }
 
     /**
      * Test load by class and class loader.

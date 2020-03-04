@@ -33,9 +33,20 @@ public class RoundRobinLoadBalance extends AbstractLoadBalance {
     @Override
     protected <T> T doSelect(List<T> invokers) {
         int length = invokers.size();
+        /* vergilyn-comment, 2020-02-29 >>>>
+         * getPositiveSequence() 不如写成下面这样
+         * ```
+         *  int sequence = SEQUENCE.getAndIncrement();
+         *  // 如果达到最大值`2147483647`，继续getAndIncr `-2147483648`、`-2147483648`...
+         *  sequence = sequence < 0 ? -sequence : sequence;
+         * ```
+         */
         return invokers.get(getPositiveSequence() % length);
     }
 
+    /**
+     * 不如直接 {@linkplain AtomicInteger#getAndIncrement()}，当达到最大值`2147483647`时，从`-2147483648`开始。
+     */
     private int getPositiveSequence() {
         for (; ; ) {
             int current = sequence.get();

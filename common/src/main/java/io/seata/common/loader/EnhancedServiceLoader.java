@@ -41,13 +41,31 @@ import org.slf4j.LoggerFactory;
 
 /**
  * The type Enhanced service loader.
+ * <p>vergilyn-comment, 2020-03-04 >>>> <br/>
+ *   1. 注意参考 {@linkplain #SERVICES_DIRECTORY} 和 {@linkplain #SEATA_DIRECTORY} 目录下的文件。<br/>
+ *   2. 实例化是通过{@linkplain Class#newInstance()}，所以non-singleton。<br/>
+ *   3. 如果`s instanceof {@linkplain Initialize}`, 则实例化后调用其`init()`。<br/>
+ * </p>
  *
  * @author slievrly
  */
 public class EnhancedServiceLoader {
     private static final Logger LOGGER = LoggerFactory.getLogger(EnhancedServiceLoader.class);
+    /**
+     * vergilyn-comment, 2020-03-04 >>>>
+     *   常规需要该目录下的配置文件支持
+     */
     private static final String SERVICES_DIRECTORY = "META-INF/services/";
+
+    /**
+     * vergilyn-comment, 2020-03-04 >>>>
+     *   如果指定了参数`activateName`，则每次都会尝试从该父目录下特定的子目录中再次加载。
+     */
     private static final String SEATA_DIRECTORY = "META-INF/seata/";
+
+    /**
+     * vergilyn-comment, 2020-03-04 >>>> 缓存机制
+     */
     @SuppressWarnings("rawtypes")
     private static Map<Class, List<Class>> providers = new ConcurrentHashMap<Class, List<Class>>();
 
@@ -199,10 +217,12 @@ public class EnhancedServiceLoader {
                                   Object[] args) {
         try {
             boolean foundFromCache = true;
+
+            // vergilyn-comment, 2020-03-04 >>>> 如果 providers 中存在，则不会重新解析和实例化
             List<Class> extensions = providers.get(service);
             if (extensions == null) {
                 synchronized (service) {
-                    extensions = providers.get(service);
+                    extensions = providers.get(service);  // 防止并发
                     if (extensions == null) {
                         extensions = findAllExtensionClass(service, activateName, loader);
                         foundFromCache = false;
@@ -210,7 +230,11 @@ public class EnhancedServiceLoader {
                     }
                 }
             }
+
+            // 加载指定name的class。
             if (StringUtils.isNotEmpty(activateName)) {
+
+                // 会从 相应的指定目录 再次加载（并add到provider）
                 loadFile(service, SEATA_DIRECTORY + activateName.toLowerCase() + "/", loader, extensions);
 
                 List<Class> activateExtensions = new ArrayList<Class>();
@@ -219,6 +243,7 @@ public class EnhancedServiceLoader {
                     LoadLevel activate = (LoadLevel) clz.getAnnotation(LoadLevel.class);
                     if (activate != null && activateName.equalsIgnoreCase(activate.name())) {
                         activateExtensions.add(clz);
+                        // vergilyn-comment, 2020-03-04 >>>> 个人觉得这里可以 break。
                     }
                 }
 
@@ -230,8 +255,12 @@ public class EnhancedServiceLoader {
                     "not found service provider for : " + service.getName() + "[" + activateName
                         + "] and classloader : " + ObjectUtils.toString(loader));
             }
-            Class<?> extension = extensions.get(extensions.size() - 1);
+            Class<?> extension = extensions.get(extensions.size() - 1);  // 取 LoadLevel.order的较大值
+
+            // 实例化，并判断是否（service instanceof Initialize？）调用`init()`
             S result = initInstance(service, extension, argTypes, args);
+
+            // 第一次load才打印
             if (!foundFromCache && LOGGER.isInfoEnabled()) {
                 LOGGER.info("load " + service.getSimpleName() + "[" + activateName + "] extension by class[" + extension
                     .getName() + "]");
@@ -248,6 +277,9 @@ public class EnhancedServiceLoader {
         }
     }
 
+    /**
+     * @return {@linkplain LoadLevel#order()} ASC
+     */
     @SuppressWarnings("rawtypes")
     private static <S> List<Class> findAllExtensionClass(Class<S> service, String activateName, ClassLoader loader) {
         List<Class> extensions = new ArrayList<Class>();
@@ -261,6 +293,8 @@ public class EnhancedServiceLoader {
         if (extensions.isEmpty()) {
             return extensions;
         }
+
+        // LoadLevel.order ASC
         Collections.sort(extensions, new Comparator<Class>() {
             @Override
             public int compare(Class c1, Class c2) {
@@ -330,7 +364,10 @@ public class EnhancedServiceLoader {
 
     /**
      * init instance
-     *
+     * <p>vergilyn-comment, 2020-03-04 >>>> <br/>
+     *   1. 如果实现了{@linkplain Initialize}，则调用{@linkplain Initialize#init()}。 <br/>
+     *   2. 每次都是`newInstance`，所以non-singleton。
+     * </p>
      * @param <S>       the type parameter
      * @param service   the service
      * @param implClazz the impl clazz

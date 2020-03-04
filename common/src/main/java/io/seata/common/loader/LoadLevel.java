@@ -39,7 +39,7 @@ public @interface LoadLevel {
 
     /**
      * Order int.
-     *
+     * vergilyn-comment, 2020-03-04 >>>> 若 {@linkplain EnhancedServiceLoader} 不指定`name` 则默认取 order较大的。
      * @return the int
      */
     int order() default 0;
