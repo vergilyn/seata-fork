@@ -30,8 +30,8 @@ import io.seata.core.protocol.transaction.BranchCommitRequest;
 import io.seata.core.protocol.transaction.BranchCommitResponse;
 import io.seata.core.protocol.transaction.BranchRollbackRequest;
 import io.seata.core.protocol.transaction.BranchRollbackResponse;
-import io.seata.core.rpc.ChannelManager;
-import io.seata.core.rpc.ServerMessageSender;
+import io.seata.core.rpc.netty.ChannelManager;
+import io.seata.core.rpc.RemotingServer;
 import io.seata.server.coordinator.AbstractCore;
 import io.seata.server.session.BranchSession;
 import io.seata.server.session.GlobalSession;
@@ -45,8 +45,8 @@ import io.seata.server.session.SessionHolder;
  */
 public class SagaCore extends AbstractCore {
 
-    public SagaCore(ServerMessageSender messageSender) {
-        super(messageSender);
+    public SagaCore(RemotingServer remotingServer) {
+        super(remotingServer);
     }
 
     @Override
@@ -56,7 +56,7 @@ public class SagaCore extends AbstractCore {
 
     @Override
     public void globalSessionStatusCheck(GlobalSession globalSession) throws GlobalTransactionException {
-        // SAGA type accept forward(retry) operation, forward operation will register remaining branches
+        // SAGA type accept forward(retry) operation on timeout or commit fail, forward operation will register remaining branches
     }
 
     @Override
@@ -74,7 +74,7 @@ public class SagaCore extends AbstractCore {
                     + ", cannot find channel by resourceId[" + sagaResourceId + "]");
             return BranchStatus.PhaseTwo_CommitFailed_Retryable;
         }
-        BranchCommitResponse response = (BranchCommitResponse) messageSender.sendSyncRequest(sagaChannel, request);
+        BranchCommitResponse response = (BranchCommitResponse) remotingServer.sendSyncRequest(sagaChannel, request);
         return response.getBranchStatus();
     }
 
@@ -93,7 +93,7 @@ public class SagaCore extends AbstractCore {
                     + ", cannot find channel by resourceId[" + sagaResourceId + "]");
             return BranchStatus.PhaseTwo_RollbackFailed_Retryable;
         }
-        BranchRollbackResponse response = (BranchRollbackResponse) messageSender.sendSyncRequest(sagaChannel, request);
+        BranchRollbackResponse response = (BranchRollbackResponse) remotingServer.sendSyncRequest(sagaChannel, request);
         return response.getBranchStatus();
     }
 
@@ -101,7 +101,7 @@ public class SagaCore extends AbstractCore {
     public boolean doGlobalCommit(GlobalSession globalSession, boolean retrying) throws TransactionException {
         try {
             BranchStatus branchStatus = branchCommit(globalSession, SessionHelper.newBranch(BranchType.SAGA,
-                    globalSession.getXid(), -1, getSagaResourceId(globalSession), null));
+                    globalSession.getXid(), -1, getSagaResourceId(globalSession), globalSession.getStatus().name()));
 
             switch (branchStatus) {
                 case PhaseTwo_Committed:
@@ -159,7 +159,7 @@ public class SagaCore extends AbstractCore {
     public boolean doGlobalRollback(GlobalSession globalSession, boolean retrying) throws TransactionException {
         try {
             BranchStatus branchStatus = branchRollback(globalSession, SessionHelper.newBranch(BranchType.SAGA,
-                    globalSession.getXid(), -1, getSagaResourceId(globalSession), null));
+                    globalSession.getXid(), -1, getSagaResourceId(globalSession), globalSession.getStatus().name()));
 
             switch (branchStatus) {
                 case PhaseTwo_Rollbacked:
@@ -169,6 +169,11 @@ public class SagaCore extends AbstractCore {
                 case PhaseTwo_RollbackFailed_Unretryable:
                     SessionHelper.endRollbackFailed(globalSession);
                     LOGGER.error("Failed to rollback SAGA global[{}]", globalSession.getXid());
+                    return false;
+                case PhaseTwo_CommitFailed_Retryable:
+                    SessionHolder.getRetryRollbackingSessionManager().removeGlobalSession(globalSession);
+                    globalSession.queueToRetryCommit();
+                    LOGGER.warn("Retry by custom recover strategy [Forward] on timeout, SAGA global[{}]", globalSession.getXid());
                     return false;
                 default:
                     LOGGER.error("Failed to rollback SAGA global[{}]", globalSession.getXid());
